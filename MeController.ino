@@ -4,7 +4,7 @@
 #include <Filters.h>
 
 #define UPRIGHT -1.9  //1.52
-#define TILTBAK -5
+#define TILTBAK -5  //3.72
 #define MOTORTYPE 0  //set 1 for DC motor, 0 for EncoderMotor.
 //#define TILTFWD -1.83
 
@@ -15,45 +15,33 @@ enum States prevState = STOP;
 MeGyro gyro;
 // MeUltrasonicSensor ultraSensor(PORT_7);
 MePotentiometer myPotentiometer(PORT_7);
-#if MOTORTYPE
-MeMegaPiDCMotor motor1(PORT1B);
-MeMegaPiDCMotor motor2(PORT2B);
-#else
+MePotentiometer myPotentiometer2(PORT_8);
+Me7SegmentDisplay disp(PORT_5);
 MeEncoderOnBoard motor1(SLOT1);
 MeEncoderOnBoard motor2(SLOT2);
-#endif
+double distTravelled;
 //PID params
-double pidBias = 0.0; //0: angle only, 1: speed only, 0.5: equal weight
+double pidBias = 0.6; //0: angle only, 1: speed only, 0.5: equal weight
     //Angle
 double setPoint1 = UPRIGHT; //deg
   double currentOffset = 0; //0 - 972
   double prevOffset = 0; //0 - 972
-#if MOTORTYPE
-double kP1 = 10;
-double kI1 = 0.1;
-double kD1 = 1.1;
-double pidMax1 = 100; //Max PID value before saturation
-#else
+
 double kP1 = 10;
 double kI1 = 0.1;
 double kD1 = 0.0;
 double pidMax1 = 100; //Max PID value before saturation
-#endif
+
 int maxAngle = 25; //+- angle range that will attempt to balance
     //Speed
-double setPoint2 = 15;  //
-double kP2 = 10.0;
-double kI2 = 0.1;
+double setPoint2 = 10;  //
+double kP2 = 15.0;
+double kI2 = 0.15;
 double kD2 = 0.0;
 double pidMax2 = 255; //Max PID value before saturation
 //Motor params
-#if MOTORTYPE
-int motorMax = 255; // motorMin-255
-int motorMin = 20; // 0 - motorMax
-int motorOffset = 0;
-#else
+double wheelCorrect;
 double motorMaxRPM = 255;
-#endif
 
 //flags
 unsigned int flagEnterState = FALSE;
@@ -105,7 +93,6 @@ void resetFlags(){
 //int checkTurnAngle();
 //int checkObstacle();
 void turn180();
-#if !MOTORTYPE
 void isr_process_encoder1(void)
 {
   if(digitalRead(motor1.getPortB()) == 0)
@@ -129,9 +116,7 @@ void isr_process_encoder2(void)
     motor2.pulsePosPlus();
   }
 }
-#endif
 void setup(){
-    #if !MOTORTYPE
     attachInterrupt(motor1.getIntNum(), isr_process_encoder1, RISING);
     attachInterrupt(motor2.getIntNum(), isr_process_encoder2, RISING);
 
@@ -141,7 +126,6 @@ void setup(){
 
     TCCR2A = _BV(WGM21) | _BV(WGM20);
     TCCR2B = _BV(CS21);
-    #endif
     Serial.begin(115200);
     gyro.begin();
 }
@@ -151,10 +135,9 @@ void loop(){
     gyro.update();
     currentOffset = myPotentiometer.read();
     
-    #if !MOTORTYPE
     motor1.updateSpeed();
     motor2.updateSpeed();
-    #endif
+    motor1.updateCurPos();
     angX = gyro.getAngleX();
     angY = gyro.getAngleY();
     angZ = gyro.getAngleZ();
@@ -189,7 +172,6 @@ void loop(){
     else if(pidOut1 < -pidMax1) pidOut1 = -pidMax1;
 
     // PID CONTROL SPEED
-    #if !MOTORTYPE
     motorAvSpeed = (motor1.getCurrentSpeed()+motor2.getCurrentSpeed())/2;
     filterOneLowpass.input(motorAvSpeed);
     LPFmotorAvSpeed = filterOneLowpass.output();
@@ -207,39 +189,41 @@ void loop(){
     else if(I2 < -pidMax2) I2 = -pidMax2;
     //Mix PID Outputs
     pidOutFinal = (1-pidBias)*pidOut1/pidMax1 + pidBias*pidOut2/pidMax2;
-    #endif
+ 
 
     #if 1
-    Serial.print("SP1:");
+    wheelCorrect = (double) myPotentiometer2.read()/972*0.3+0.95;
+    Serial.print("SP1: ");
     Serial.print(setPoint1);
-    Serial.print(" ER1:");
-    Serial.print(currentError1);
-    Serial.print(" ER2:");
-    Serial.print(currentError2);
-    Serial.print(" MTRSPD:");
-    Serial.print(LPFmotorAvSpeed);
+    Serial.print("whlPot: ");
+    Serial.print(wheelCorrect);
+    Serial.print("\n");
+    // Serial.print(" ER1:");
+    // Serial.print(currentError1);
+    // Serial.print(" ER2:");
+    // Serial.print(currentError2);
+    // Serial.print(" MTRSPD:");
+    // Serial.print(LPFmotorAvSpeed);
     // Serial.print(" PIDang:");
     //  Serial.print(pidOut1);
     //  Serial.print(" PIDspd:");
     //  Serial.print(pidOut2);
-    Serial.print(" PIDfnl:");
-    Serial.println(pidOutFinal);
+    // Serial.print(" PIDfnl:");
+    // Serial.println(pidOutFinal);
     // Serial.print(" MotorSpd: ");
     // Serial.println(motorAvSpeed);
     #endif
 
     // Give up if over max angle
     // Else adjust speed according to PID
-    if(0) motorSpeed = 0;
-    #if MOTORTYPE
-    else motorSpeed = pidOut1 * (motorMax - motorMin)/pidMax1 + motorMin+motorOffset;
-    motor1.run(-motorSpeed); /* value: between -255 and 255. */
-    motor2.run(motorSpeed); /* value: between -255 and 255. */
-    #else
+    if(flagHasTipped) motorSpeed = 0;
     else motorSpeed = pidOutFinal*motorMaxRPM;
     motor1.setMotorPwm(motorSpeed);
-    motor2.setMotorPwm(-motorSpeed);
-    #endif
+    motor2.setMotorPwm(-motorSpeed*wheelCorrect);
+    distTravelled = motor1.getCurPos()*5/850;
+    disp.display(distTravelled);
+    // motor2.setMotorPwm(-motorSpeed*wheelCorrect);
+
     // prevOffset = currentOffset;
     prevTime = currentTime;
     prevError1 = currentError1;
@@ -305,7 +289,7 @@ void loop(){
         }
         //During Actions:
             //add actions below
-            setPoint1 = TILTBAK + currentOffset/972*7.5;
+            setPoint1 = TILTBAK + currentOffset/972*12;
             //add actions above
 
         //Exit Actions:
