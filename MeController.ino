@@ -4,7 +4,7 @@
 #include <Filters.h>
 
 #define UPRIGHT -1.9  //1.52
-#define TILTBAK -5  //3.72
+#define TILTBAK -8  //3.72
 #define MOTORTYPE 0  //set 1 for DC motor, 0 for EncoderMotor.
 //#define TILTFWD -1.83
 
@@ -21,7 +21,7 @@ MeEncoderOnBoard motor1(SLOT1);
 MeEncoderOnBoard motor2(SLOT2);
 double distTravelled;
 //PID params
-double pidBias = 0.6; //0: angle only, 1: speed only, 0.5: equal weight
+double pidBias = 0.5; //0: angle only, 1: speed only, 0.5: equal weight
     //Angle
 double setPoint1 = UPRIGHT; //deg
   double currentOffset = 0; //0 - 972
@@ -34,9 +34,9 @@ double pidMax1 = 100; //Max PID value before saturation
 
 int maxAngle = 25; //+- angle range that will attempt to balance
     //Speed
-double setPoint2 = 10;  //
+double setPoint2 = 3;  //
 double kP2 = 15.0;
-double kI2 = 0.15;
+double kI2 = 0.1;
 double kD2 = 0.0;
 double pidMax2 = 255; //Max PID value before saturation
 //Motor params
@@ -174,9 +174,9 @@ void loop(){
     // PID CONTROL SPEED
     motorAvSpeed = (motor1.getCurrentSpeed()+motor2.getCurrentSpeed())/2;
     filterOneLowpass.input(motorAvSpeed);
-    LPFmotorAvSpeed = filterOneLowpass.output();
+    LPFmotorAvSpeed = -filterOneLowpass.output();
     currentError2 = setPoint2 - LPFmotorAvSpeed;
-    sumError2 += currentError1;
+    sumError2 += currentError2;
     // sumError Saturation
     if(sumError2 > pidMax1) sumError2 = pidMax1; 
     else if(sumError2 < -pidMax1) sumError2 = -pidMax1;
@@ -188,15 +188,18 @@ void loop(){
     if(I2 > pidMax2) I2 = pidMax2; 
     else if(I2 < -pidMax2) I2 = -pidMax2;
     //Mix PID Outputs
-    pidOutFinal = (1-pidBias)*pidOut1/pidMax1 + pidBias*pidOut2/pidMax2;
+    pidOutFinal = pidOut1/pidMax1 + pidBias*pidOut2/pidMax2;
+    // pidOutFinal = (1-pidBias)*pidOut1/pidMax1 + pidBias*pidOut2/pidMax2;
  
 
     #if 1
     wheelCorrect = (double) myPotentiometer2.read()/972*0.3+0.95;
-    Serial.print("SP1: ");
-    Serial.print(setPoint1);
-    Serial.print("whlPot: ");
-    Serial.print(wheelCorrect);
+    Serial.print("SP2: ");
+    Serial.print(setPoint2);
+    Serial.print(" spdin: ");
+    Serial.print(LPFmotorAvSpeed);
+    Serial.print(" spdout: ");
+    Serial.print(pidOut2);
     Serial.print("\n");
     // Serial.print(" ER1:");
     // Serial.print(currentError1);
