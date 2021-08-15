@@ -3,8 +3,8 @@
 #include <Wire.h>
 #include <Filters.h>
 
-#define REVSP 5.5  //1.52
-#define FWDSP -5  //3.72
+#define REVSP 0  //1.52
+#define FWDSP 0  //3.72
 #define MOTORTYPE 0  //set 1 for DC motor, 0 for EncoderMotor.
 //#define TILTFWD -1.83
 
@@ -24,11 +24,12 @@ double distTravelled;
 double pidBias = 0.5; //0: angle only, 1: speed only, 0.5: equal weight
     //Angle
 double setPoint1 = REVSP; //deg
-  double currentOffset = 0; //0 - 972
+  double currentOffset1 = 0; //0 - 972
+  double currentOffset2 = 0; //0 - 972
   double prevOffset = 0; //0 - 972
 
-double kP1 = 14;
-double kI1 = 0.2;
+double kP1 = 11;
+double kI1 = 0.1;
 double kD1 = 0.0;
 double pidMax1 = 100; //Max PID value before saturation
 
@@ -40,7 +41,7 @@ double kI2 = 0.15;
 double kD2 = 0.0;
 double pidMax2 = 255; //Max PID value before saturation
 //Motor params
-double wheelCorrect;
+double wheelCorrect=1.12;
 double motorMaxRPM = 255;
 
 //flags
@@ -133,7 +134,8 @@ void setup(){
 void loop(){
     //Loop Functions:
     gyro.update();
-    currentOffset = myPotentiometer.read();
+    currentOffset1 = myPotentiometer.read();
+    currentOffset2 = myPotentiometer2.read();
     
     motor1.updateSpeed();
     motor2.updateSpeed();
@@ -142,11 +144,12 @@ void loop(){
     angY = gyro.getAngleY();
     angZ = gyro.getAngleZ();
     accY = gyro.getAccY();
-    //setPoint1 = REVSP + (currentOffset - prevOffset)/972*2;
+    //setPoint1 = REVSP + (currentOffset1 - prevOffset)/972*2;
+    //setPoint1 = REVSP + (currentOffset2 - prevOffset)/972*2;
 
     //update Flags
     flagHasTipped = (angY< -maxAngle || angY > maxAngle)? TRUE : FALSE;
-    if (distTravelled>3) flagHasTravelled5m = TRUE;
+    if (distTravelled>50) flagHasTravelled5m = TRUE;
     if (distTravelled<0 && flagHasTravelled5m) flagHasTurned180 = TRUE;
     // flagHasTurned180 = 0 ? flagHasTravelled5m &&distTravelled<0 : FALSE;
     // flagHasTravelled5m = checkDistance() ? TRUE : FALSE;
@@ -194,7 +197,6 @@ void loop(){
  
 
     #if 1
-    wheelCorrect = (double) myPotentiometer2.read()/972*0.3+0.95;
     // Serial.print(currentState);
     // Serial.print(angY);
     Serial.print(" sp1: ");
@@ -222,19 +224,17 @@ void loop(){
 
     // Give up if over max angle
     // Else adjust speed according to PID
-    if(flagHasTipped) motorSpeed = 0;
-    else motorSpeed = pidOutFinal*motorMaxRPM;
-    motor1.setMotorPwm(motorSpeed);
-    motor2.setMotorPwm(-motorSpeed*wheelCorrect);
+    
     distTravelled = ((double)motor1.getCurPos())/170;
     // if (distTravelled>10) flagHasTravelled5m = true;
     disp.display(distTravelled);
-    // motor2.setMotorPwm(-motorSpeed*wheelCorrect);
 
-    // prevOffset = currentOffset;
+    // prevOffset = currentOffset1;
+    // prevOffset = currentOffset2;
     prevTime = currentTime;
     prevError1 = currentError1;
-    prevOffset = currentOffset;
+    prevOffset = currentOffset1;
+    prevOffset = currentOffset2;
     ///////////////////////////////////////////////////////////////////////////
 
     
@@ -301,7 +301,11 @@ void loop(){
         //During Actions:
             //add actions below
         //    Serial.println("RUN State");
-            setPoint1 = FWDSP + currentOffset/972*5;
+            setPoint1 = currentOffset1/972*10-10;
+            if(flagHasTipped) motorSpeed = 0;
+    else motorSpeed = pidOutFinal*motorMaxRPM;
+    motor1.setMotorPwm(motorSpeed);
+    motor2.setMotorPwm(-motorSpeed*wheelCorrect);
             //add actions above
 
         //Exit Actions:
@@ -338,8 +342,12 @@ void loop(){
         //During Actions:
             //add actions below
         //    Serial.println("REVERSE State");
-            setPoint2 = -9;
-            setPoint1 = REVSP-currentOffset/972*5;
+            setPoint2 = -8;
+            setPoint1 = currentOffset2/972*10-5;
+                  if(flagHasTipped) motorSpeed = 0;
+                else motorSpeed = pidOutFinal*motorMaxRPM;
+    motor1.setMotorPwm(motorSpeed);
+    motor2.setMotorPwm(-motorSpeed);
             //add actions above
 
         //Exit Actions:
