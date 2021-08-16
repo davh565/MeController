@@ -33,7 +33,7 @@ double kI1 = 0.1;
 double kD1 = 0.0;
 double pidMax1 = 100; //Max PID value before saturation
 
-int maxAngle = 35; //+- angle range that will attempt to balance
+int maxAngle = 30; //+- angle range that will attempt to balance
     //Speed
 double setPoint2 = 8;  //
 double kP2 = 15.0;
@@ -148,7 +148,7 @@ void loop(){
     //setPoint1 = REVSP + (currentOffset2 - prevOffset)/972*2;
 
     //update Flags
-    flagHasTipped = (angY< -maxAngle || angY > maxAngle)? TRUE : FALSE;
+    flagHasTipped = (currentError1< -maxAngle || currentError1 > maxAngle)? TRUE : FALSE;
     if (distTravelled>50) flagHasTravelled5m = TRUE;
     if (distTravelled<0 && flagHasTravelled5m) flagHasTurned180 = TRUE;
     // flagHasTurned180 = 0 ? flagHasTravelled5m &&distTravelled<0 : FALSE;
@@ -156,7 +156,6 @@ void loop(){
     // flagHasTurned180 = checkTurnAngle() ? TRUE : FALSE;
     flagObstacleDetected = 0 ? TRUE : FALSE;
     // flagObstacleDetected = (ultraSensor.distanceCm() < 10.0) ? TRUE : FALSE;
-
 
     currentTime = millis();
     // PID CONTROL BALANCE
@@ -208,10 +207,10 @@ void loop(){
     // // Serial.print(" spdout: ");
     // // Serial.print(pidOut2);
     Serial.print("\n");
-    // // Serial.print(" ER1:");
-    // Serial.print(currentError1);
-    // Serial.print(" ER2:");
-    // Serial.print(currentError2);
+    Serial.print(" ER1:");
+    Serial.print(currentError1);
+    Serial.print(" ER2:");
+    Serial.print(currentError2);
     // Serial.print(" MTRSPD:");
     // Serial.print(LPFmotorAvSpeed);
     // Serial.print(" PIDang:");
@@ -301,7 +300,7 @@ void loop(){
         //During Actions:
             //add actions below
         //    Serial.println("RUN State");
-            setPoint1 = currentOffset1/972*10-10;
+            setPoint1 = currentOffset1/200*10-10;
             if(flagHasTipped) motorSpeed = 0;
     else motorSpeed = pidOutFinal*motorMaxRPM;
     motor1.setMotorPwm(motorSpeed);
@@ -320,16 +319,16 @@ void loop(){
     
     case REVERSE:
         //Transition Conditions:
-        if (flagHasTurned180){
-            prevState = currentState;
-            currentState = STOP;
-            flagExitState = TRUE;
-        }
-        else if (flagObstacleDetected){
-            prevState = currentState;
-            currentState = PAUSE;
-            flagExitState = TRUE;
-        }
+        //if (flagHasTurned180){
+         //   prevState = currentState;
+         //   currentState = STOP;
+         //   flagExitState = TRUE;
+       // }
+      //  else if (flagObstacleDetected){
+      //      prevState = currentState;
+      //      currentState = PAUSE;
+      //      flagExitState = TRUE;
+      //  }
 
         //Enter Action:
         if (flagEnterState){
@@ -338,12 +337,12 @@ void loop(){
 //            turn180();
             //add actions above
             flagEnterState = FALSE;
-        }
+        } 
         //During Actions:
             //add actions below
         //    Serial.println("REVERSE State");
-            setPoint2 = -8;
-            setPoint1 = currentOffset2/972*10-5;
+            setPoint2 = -5;
+            setPoint1 = currentOffset1/200*10-7;
                   if(flagHasTipped) motorSpeed = 0;
                 else motorSpeed = pidOutFinal*motorMaxRPM;
     motor1.setMotorPwm(motorSpeed);
