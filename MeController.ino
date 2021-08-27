@@ -13,27 +13,39 @@ enum States currentState = STOP;
 enum States prevState = STOP;
 
 MeGyro gyro;
-// MeUltrasonicSensor ultraSensor(PORT_7);
+//MeUltrasonicSensor ultraSensor(PORT_7);
 MePotentiometer myPotentiometer(PORT_7);
 MePotentiometer myPotentiometer2(PORT_8);
 Me7SegmentDisplay disp(PORT_5);
 MeEncoderOnBoard motor1(SLOT1);
 MeEncoderOnBoard motor2(SLOT2);
-double distTravelled;
+
+double distTravelled1;
+double distTravelled2;
+double turnkP = 0.13;
+double zFiltergain = 0.5;
+double zFilterout;
 //PID params
 double pidBias = 0.5; //0: angle only, 1: speed only, 0.5: equal weight
-    //Angle
+//Angle
 double setPoint1 = REVSP; //deg
-  double currentOffset1 = 0; //0 - 972
-  double currentOffset2 = 0; //0 - 972
-  double prevOffset = 0; //0 - 972
+double currentOffset1 = 0; //0 - 972
+double currentOffset2 = 0; //0 - 972
+double prevOffset = 0; //0 - 972
 
-double kP1 = 11;
-double kI1 = 0.1;
-double kD1 = 0.0;
+double kP1;
+double kI1;
+double kD1;
+double kP1Agg = 100;
+double kI1Agg = 0.4;
+double kD1Agg = 0.0;
+double kP1Con = 11;
+double kI1Con = 0.1;
+double kD1Con = 0.0;
 double pidMax1 = 100; //Max PID value before saturation
 
-int maxAngle = 30; //+- angle range that will attempt to balance
+int aggAngle = 3; //+- angle range that will attempt to balance
+int maxAngle = 35; //+- angle range that will attempt to balance
     //Speed
 double setPoint2 = 8;  //
 double kP2 = 15.0;
@@ -45,6 +57,7 @@ double wheelCorrect=1.12;
 double motorMaxRPM = 255;
 
 //flags
+unsigned int flagAgressive = false;
 unsigned int flagEnterState = false;
 unsigned int flagExitState = FALSE;
 unsigned int flagHasTravelled5m = FALSE;
@@ -94,28 +107,13 @@ void resetFlags(){
 //int checkTurnAngle();
 //int checkObstacle();
 void turn180();
-void isr_process_encoder1(void)
-{
-  if(digitalRead(motor1.getPortB()) == 0)
-  {
-    motor1.pulsePosMinus();
-  }
-  else
-  {
-    motor1.pulsePosPlus();;
-  }
+void isr_process_encoder1(void){
+    if(digitalRead(motor1.getPortB()) == 0) motor1.pulsePosMinus();
+    else motor1.pulsePosPlus();
 }
-
-void isr_process_encoder2(void)
-{
-  if(digitalRead(motor2.getPortB()) == 0)
-  {
-    motor2.pulsePosMinus();
-  }
-  else
-  {
-    motor2.pulsePosPlus();
-  }
+void isr_process_encoder2(void){
+    if(digitalRead(motor2.getPortB()) == 0) motor2.pulsePosMinus();
+    else motor2.pulsePosPlus();
 }
 void setup(){
     attachInterrupt(motor1.getIntNum(), isr_process_encoder1, RISING);
@@ -123,8 +121,7 @@ void setup(){
 
     //Set PWM 8KHz
     TCCR1A = _BV(WGM10);
-    TCCR1B = _BV(CS11) | _BV(WGM12);
-
+    TCCR1B = _BV(CS11)  | _BV(WGM12);
     TCCR2A = _BV(WGM21) | _BV(WGM20);
     TCCR2B = _BV(CS21);
     Serial.begin(115200);
@@ -140,6 +137,7 @@ void loop(){
     motor1.updateSpeed();
     motor2.updateSpeed();
     motor1.updateCurPos();
+    motor2.updateCurPos();
     angX = gyro.getAngleX();
     angY = gyro.getAngleY();
     angZ = gyro.getAngleZ();
@@ -149,13 +147,17 @@ void loop(){
 
     //update Flags
     flagHasTipped = (currentError1< -maxAngle || currentError1 > maxAngle)? TRUE : FALSE;
-    if (distTravelled>50) flagHasTravelled5m = TRUE;
-    if (distTravelled<0 && flagHasTravelled5m) flagHasTurned180 = TRUE;
-    // flagHasTurned180 = 0 ? flagHasTravelled5m &&distTravelled<0 : FALSE;
+    flagAgressive = (currentError1< -aggAngle || currentError1 > aggAngle)? TRUE : FALSE;
+    if (distTravelled1>50) flagHasTravelled5m = TRUE;
+    if (distTravelled1<0 && flagHasTravelled5m) flagHasTurned180 = TRUE;
+    // flagHasTurned180 = 0 ? flagHasTravelled5m &&distTravelled1<0 : FALSE;
     // flagHasTravelled5m = checkDistance() ? TRUE : FALSE;
     // flagHasTurned180 = checkTurnAngle() ? TRUE : FALSE;
     flagObstacleDetected = 0 ? TRUE : FALSE;
     // flagObstacleDetected = (ultraSensor.distanceCm() < 10.0) ? TRUE : FALSE;
+    kP1 = (flagAgressive) ? kP1Agg : kP1Con;
+    kI1 = (flagAgressive) ? kI1Agg : kI1Con;
+    kD1 = (flagAgressive) ? kD1Agg : kD1Con;
 
     currentTime = millis();
     // PID CONTROL BALANCE
@@ -207,26 +209,14 @@ void loop(){
     // // Serial.print(" spdout: ");
     // // Serial.print(pidOut2);
     Serial.print("\n");
-    Serial.print(" ER1:");
-    Serial.print(currentError1);
-    Serial.print(" ER2:");
-    Serial.print(currentError2);
-    // Serial.print(" MTRSPD:");
-    // Serial.print(LPFmotorAvSpeed);
-    // Serial.print(" PIDang:");
-    //  Serial.print(pidOut1);
-    //  Serial.print(" PIDspd:");
-    //  Serial.print(pidOut2);
-    // Serial.print(" PIDfnl:");
-    // Serial.println(pidOutFinal);
     #endif
 
-    // Give up if over max angle
-    // Else adjust speed according to PID
-    
-    distTravelled = ((double)motor1.getCurPos())/170;
-    // if (distTravelled>10) flagHasTravelled5m = true;
-    disp.display(distTravelled);
+    // if (distTravelled1>10) flagHasTravelled5m = true;
+    distTravelled1 = ((double)motor1.getCurPos())/170;
+    distTravelled2 = ((double)motor1.getCurPos())/170;
+    disp.display(distTravelled1);
+    if (distTravelled1>10)zFilterout = (1-zFiltergain)*angZ+zFiltergain*(distTravelled1-distTravelled2);
+    else zFilterout = angZ;
 
     // prevOffset = currentOffset1;
     // prevOffset = currentOffset2;
@@ -234,168 +224,157 @@ void loop(){
     prevError1 = currentError1;
     prevOffset = currentOffset1;
     prevOffset = currentOffset2;
-    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
 
     
-    //Finite State Machine:
+    //Finite State Machine://===================================================
     switch (currentState)
     {
-    case STOP:
-        //Transition Conditions:
+    case STOP://----------------------------------------------------------------
+        //Transition Conditions:::::::::::::::::::::::::::::::::::::::::::::::::
         if (!flagRunEnded){
             prevState = currentState;
             currentState = RUN;
             flagExitState = TRUE;
         }
-        //Enter Action:
+        //Enter Action::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         if (flagEnterState){
-            //add actions below
+            //add actions below.................................................
             resetFlags();
-        //    Serial.println("entering STOP State");
+            //Serial.println("entering STOP State");
             if (prevState == RUN) flagRunEnded = TRUE;
-            // setLED(LEFT,colour);
-            //add actions above
+            //setLED(LEFT,colour);
+            //add actions above.................................................
             flagEnterState = FALSE;
         }
         //During Actions:
-            //add actions below
-                        // setPoint2 = 0;
-            // setPoint1 = 0;
-                motor1.setMotorPwm(0);
-    motor2.setMotorPwm(0);
-
-            if (flagHasTipped && flagRunEnded) flagRunEnded = FALSE; //Tip to reset after run
-            //add actions above
+        //add actions below.....................................................
+        // setPoint2 = 0;
+        // setPoint1 = 0;
+        motor1.setMotorPwm(0);
+        motor2.setMotorPwm(0);
+        if (flagHasTipped && flagRunEnded) flagRunEnded = FALSE; //Tip to reset after run
+        //add actions above.....................................................
 
         //Exit Actions:
         if (flagExitState){
-            //add actions below
-
-            //add actions above
+            //add actions below.................................................
+            //add actions above.................................................
             flagExitState = FALSE;
             flagEnterState = TRUE;
         }
         break;
     
-    case RUN:
-        //Transition Conditions:
+    case RUN://-----------------------------------------------------------------
+        //Transition Conditions:::::::::::::::::::::::::::::::::::::::::::::::::
         if (flagHasTravelled5m && !flagHasTurned180){
             prevState = currentState;
             currentState = REVERSE;
             flagExitState = TRUE;
         }
-        else if (flagObstacleDetected){
-            prevState = currentState;
-            currentState = PAUSE;
-            flagExitState = TRUE;
-        }
-
-        //Enter Action:
+        // else if (flagObstacleDetected){
+        //     prevState = currentState;
+        //     currentState = PAUSE;
+        //     flagExitState = TRUE;
+        // }
+        //Enter Action::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         if (flagEnterState){
-            //add actions below
+            //add actions below.................................................
             // setLED(LEFT,colour);
-            //add actions above
+            //add actions above.................................................
             flagEnterState = FALSE;
         }
-        //During Actions:
-            //add actions below
-        //    Serial.println("RUN State");
-            setPoint1 = currentOffset1/200*10-10;
-            if(flagHasTipped) motorSpeed = 0;
-    else motorSpeed = pidOutFinal*motorMaxRPM;
-    motor1.setMotorPwm(motorSpeed);
-    motor2.setMotorPwm(-motorSpeed*wheelCorrect);
-            //add actions above
+        //During Actions::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        //add actions below.....................................................
+        //Serial.println("RUN State");
+        setPoint1 = currentOffset1/200*10-10+flagAgressive*2;
+        if(flagHasTipped) motorSpeed = 0;
+        else motorSpeed = pidOutFinal*motorMaxRPM;
+        motor1.setMotorPwm(motorSpeed+turnkP*zFilterout);
+        motor2.setMotorPwm(-motorSpeed+turnkP*zFilterout*wheelCorrect);
+        //add actions above.....................................................
 
-        //Exit Actions:
+        //Exit Actions::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         if (flagExitState){
-            //add actions below
-
-            //add actions above
+            //add actions below.................................................
+            //add actions above.................................................
             flagExitState = FALSE;
             flagEnterState = TRUE;
         }
         break;
     
-    case REVERSE:
-        //Transition Conditions:
+    case REVERSE://-------------------------------------------------------------
+        //Transition Conditions:::::::::::::::::::::::::::::::::::::::::::::::::
         //if (flagHasTurned180){
-         //   prevState = currentState;
-         //   currentState = STOP;
-         //   flagExitState = TRUE;
-       // }
-      //  else if (flagObstacleDetected){
-      //      prevState = currentState;
-      //      currentState = PAUSE;
-      //      flagExitState = TRUE;
-      //  }
+            //prevState = currentState;
+            //currentState = STOP;
+            //flagExitState = TRUE;
+        //}
+        //else if (flagObstacleDetected){
+            //prevState = currentState;
+            //currentState = PAUSE;
+            //flagExitState = TRUE;
+        //}
 
-        //Enter Action:
+        //Enter Action::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         if (flagEnterState){
-            //add actions below
-            // setLED(LEFT,colour);
-//            turn180();
-            //add actions above
+            //add actions below.................................................
+            //setLED(LEFT,colour);
+            //turn180();
+            //add actions above.................................................
             flagEnterState = FALSE;
-        } 
-        //During Actions:
-            //add actions below
-        //    Serial.println("REVERSE State");
-            setPoint2 = -5;
-            setPoint1 = currentOffset1/200*10-7;
-                  if(flagHasTipped) motorSpeed = 0;
-                else motorSpeed = pidOutFinal*motorMaxRPM;
-    motor1.setMotorPwm(motorSpeed);
-    motor2.setMotorPwm(-motorSpeed);
-            //add actions above
-
-        //Exit Actions:
+        }
+        //During Actions::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        //add actions below.....................................................
+        //Serial.println("REVERSE State");
+        setPoint2 = -5;
+        setPoint1 = currentOffset2/200*10-7-flagAgressive*2;
+        if(flagHasTipped) motorSpeed = 0;
+        else motorSpeed = pidOutFinal*motorMaxRPM;
+        motor1.setMotorPwm(motorSpeed+turnkP*zFilterout);
+        motor2.setMotorPwm(-motorSpeed+turnkP*zFilterout);
+        //add actions above.....................................................
+        //Exit Actions::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
         if (flagExitState){
             flagRunEnded = true;
-            //add actions below
-
-            //add actions above
+            //add actions below.................................................
+            //add actions above.................................................
             flagExitState = FALSE;
             flagEnterState = TRUE;
         }
         break;
     
-    case PAUSE:
-        //Transition Conditions:
-        if (!flagObstacleDetected && prevState == RUN){
-            prevState = currentState;
-            currentState = RUN;
-            flagExitState = TRUE;
-        }
-        else if (!flagObstacleDetected && prevState == REVERSE){
-            prevState = currentState;
-            currentState = REVERSE;
-            flagExitState = TRUE;
-        }
-
-        //Enter Action:
-        if (flagEnterState){
-            //add actions below
-        //    Serial.println("entering PAUSE State");
-            // setLED(LEFT,colour);
-            //add actions above
-            flagEnterState = FALSE;
-        }
-        //During Actions:
-            //add actions below
-            
-            //add actions above
-
-        //Exit Actions:
-        if (flagExitState){
-            //add actions below
-
-            //add actions above
-            flagExitState = FALSE;
-            flagEnterState = TRUE;
-        }
-        break;
-    
+    // case PAUSE://---------------------------------------------------------------
+    //     //Transition Conditions:::::::::::::::::::::::::::::::::::::::::::::::::
+    //     if (!flagObstacleDetected && prevState == RUN){
+    //         prevState = currentState;
+    //         currentState = RUN;
+    //         flagExitState = TRUE;
+    //     }
+    //     else if (!flagObstacleDetected && prevState == REVERSE){
+    //         prevState = currentState;
+    //         currentState = REVERSE;
+    //         flagExitState = TRUE;
+    //     }
+    //     //Enter Action::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+    //     if (flagEnterState){
+    //         //add actions below.................................................
+    //         //Serial.println("entering PAUSE State");
+    //         //setLED(LEFT,colour);
+    //         //add actions above.................................................
+    //         flagEnterState = FALSE;
+    //     }
+    //     //During Actions::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+    //     //add actions below.....................................................
+    //     //add actions above.....................................................
+    //     //Exit Actions:
+    //     if (flagExitState){
+    //         //add actions below.................................................
+    //         //add actions above.................................................
+    //         flagExitState = FALSE;
+    //         flagEnterState = TRUE;
+    //     }
+    //     break;
     default:
         prevState = currentState;
         currentState = STOP;
